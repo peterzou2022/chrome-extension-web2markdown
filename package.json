@@ -32,8 +32,9 @@
     "format": "turbo format --continue -- --cache --cache-location node_modules/.cache/.prettiercache",
     "prepare": "husky",
     "update-version": "bash bash-scripts/update_version.sh",
-    "copy-env": "bash bash-scripts/copy_env.sh",
-    "set-global-env": "bash bash-scripts/set_global_env.sh",
+    "copy-env": "node scripts/copy-env.mjs",
+    "copy-logo": "node scripts/copy-logo.mjs",
+    "set-global-env": "node scripts/set-global-env.mjs",
     "module-manager": "pnpm -F module-manager start",
     "postinstall": "pnpm copy-env"
   },

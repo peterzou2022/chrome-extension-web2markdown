@@ -1,11 +1,11 @@
 {
   "extensionDescription": {
     "description": "Extension description",
-    "message": "Chrome extension boilerplate developed with Vite, React and Typescript"
+    "message": "Turn any webpage into a structured Markdown note with AI. Extract content, summarize, and save to your local knowledge base."
   },
   "extensionName": {
     "description": "Extension name",
-    "message": "Chrome extension boilerplate"
+    "message": "AI Page Summarizer"
   },
   "toggleTheme": {
     "message": "Toggle theme"

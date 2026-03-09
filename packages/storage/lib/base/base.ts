@@ -96,7 +96,9 @@ export const createStorage = <D = string>(
       return fallback;
     }
 
-    return deserialize(value[key]) ?? fallback;
+    const raw = value[key];
+    if (raw === undefined || raw === null) return fallback;
+    return deserialize(raw) ?? fallback;
   };
 
   const set = async (valueOrUpdate: ValueOrUpdateType<D>) => {
@@ -125,10 +127,16 @@ export const createStorage = <D = string>(
 
   // Listener for live updates from the browser
   const _updateFromStorageOnChanged = async (changes: { [key: string]: chrome.storage.StorageChange }) => {
-    // Check if the key we are listening for is in the changes object
     if (changes[key] === undefined) return;
 
-    const valueOrUpdate: ValueOrUpdateType<D> = deserialize(changes[key].newValue);
+    const newValue = changes[key].newValue;
+    if (newValue === undefined || newValue === null) {
+      cache = fallback;
+      _emitChange();
+      return;
+    }
+
+    const valueOrUpdate: ValueOrUpdateType<D> = deserialize(newValue);
 
     if (cache === valueOrUpdate) return;
 

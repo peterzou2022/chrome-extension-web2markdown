@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>保存到知识库</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:system-ui,-apple-system,sans-serif;padding:24px;background:#f8fafc;color:#1e293b;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.status{text-align:center;max-width:380px}
+.status h2{font-size:16px;margin-bottom:12px}
+.status p{font-size:13px;color:#64748b;margin-bottom:8px;word-break:break-all}
+.spinner{width:32px;height:32px;border:3px solid #e2e8f0;border-top-color:#3b82f6;border-radius:50%;animation:spin .6s linear infinite;margin:0 auto 16px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.success{color:#16a34a;font-weight:600}
+.error{color:#dc2626;font-weight:600}
+.path-info{background:#f1f5f9;border-radius:6px;padding:8px 12px;margin-bottom:16px;font-size:12px;color:#475569;text-align:left;width:100%}
+.btn{padding:8px 24px;border:none;border-radius:6px;font-size:14px;cursor:pointer;margin:4px}
+.btn-primary{background:#3b82f6;color:#fff}
+.btn-primary:hover{background:#2563eb}
+.btn-secondary{background:#e2e8f0;color:#475569}
+.btn-secondary:hover{background:#cbd5e1}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+</style>
+</head>
+<body>
+<div class="status" id="root">
+  <h2 id="title">准备保存</h2>
+  <div class="path-info" id="pathInfo"></div>
+  <div id="actions">
+    <button class="btn btn-primary" id="saveBtn">确认保存</button>
+    <button class="btn btn-secondary" id="cancelBtn">取消</button>
+  </div>
+  <p id="msg"></p>
+</div>
+<script src="save-helper.js"></script>
+</body>
+</html>
