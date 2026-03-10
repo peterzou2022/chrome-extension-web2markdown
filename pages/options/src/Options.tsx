@@ -18,9 +18,10 @@ import {
   createDefaultModelConfig,
 } from '@extension/storage';
 import { cn, ErrorDisplay, LoadingSpinner, ToggleButton } from '@extension/ui';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   ApiKeyStorageStrategy,
+  KnowledgeOptionsState,
   LogicalPrimaryCategoryConfig,
   LogicalSubCategoryConfig,
   ModelConfig,
@@ -89,6 +90,8 @@ const Options = () => {
   const [dirLoading, setDirLoading] = useState(true);
   const [testResult, setTestResult] = useState<{ id: string; ok: boolean; message: string } | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [importStatus, setImportStatus] = useState<{ kind: 'success' | 'error'; message: string } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const isLightTheme = isLight ?? true;
 
@@ -212,6 +215,66 @@ const Options = () => {
   );
 
   const goGithubSite = () => chrome.tabs.create(PROJECT_URL_OBJECT);
+
+  const handleDownloadTemplate = useCallback(() => {
+    const template: KnowledgeOptionsState = {
+      models: options.models ?? [],
+      defaultModelId: options.defaultModelId,
+      apiKeyStorageStrategy: options.apiKeyStorageStrategy,
+      saveFullText: options.saveFullText ?? false,
+      categoriesConfig: options.categoriesConfig ?? [],
+    };
+    const safeTemplate: KnowledgeOptionsState = {
+      ...template,
+      models: (template.models ?? []).map(m => ({
+        ...m,
+        apiKey: '',
+      })),
+    };
+    const blob = new Blob([JSON.stringify(safeTemplate, null, 2)], {
+      type: 'application/json;charset=utf-8',
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'knowledge-config-template.json';
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [
+    options.models,
+    options.defaultModelId,
+    options.apiKeyStorageStrategy,
+    options.saveFullText,
+    options.categoriesConfig,
+  ]);
+
+  const handleImportClick = useCallback(() => {
+    setImportStatus(null);
+    fileInputRef.current?.click();
+  }, []);
+
+  const handleImportFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text) as KnowledgeOptionsState;
+      if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.models)) {
+        throw new Error('配置文件格式不正确');
+      }
+      knowledgeOptionsStorage.set(prev => ({
+        ...prev,
+        ...parsed,
+      }));
+      setImportStatus({ kind: 'success', message: '配置已成功导入' });
+    } catch (err) {
+      setImportStatus({
+        kind: 'error',
+        message: (err as Error).message || '读取配置文件失败',
+      });
+    }
+  }, []);
 
   return (
     <div className={cn('min-h-screen p-6', isLightTheme ? 'bg-slate-50 text-gray-900' : 'bg-gray-800 text-gray-100')}>
@@ -657,6 +720,39 @@ const Options = () => {
             />
             保存原文全文（默认仅保存摘要与原文摘要）
           </label>
+        </section>
+
+        <section className="space-y-3">
+          <h2 className="text-lg font-semibold">配置导入导出</h2>
+          <p className="text-sm opacity-80">
+            可以通过导出模板、本地编辑 JSON 文件后再导入，一次性配置所有模型与分类信息。
+          </p>
+          <div className="flex flex-wrap gap-3">
+            <button
+              type="button"
+              className="rounded bg-gray-100 px-3 py-1.5 text-sm hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600"
+              onClick={handleDownloadTemplate}>
+              下载配置模板
+            </button>
+            <button
+              type="button"
+              className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-700"
+              onClick={handleImportClick}>
+              导入配置文件
+            </button>
+            {importStatus && (
+              <span className={cn('text-sm', importStatus.kind === 'success' ? 'text-green-600' : 'text-red-600')}>
+                {importStatus.message}
+              </span>
+            )}
+          </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/json"
+            className="hidden"
+            onChange={handleImportFileChange}
+          />
         </section>
       </div>
     </div>
