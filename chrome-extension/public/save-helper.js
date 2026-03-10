@@ -1,4 +1,4 @@
-/* global indexedDB, window, document, chrome, setTimeout, location */
+/* global indexedDB, window, document, chrome, setTimeout, location, URL, fetch */
 
 const DB_NAME = 'knowledge-extension-db';
 const STORE_NAME = 'knowledge-dir';
@@ -65,6 +65,30 @@ async function writeFile(rootHandle, pathSegment, filename, content) {
   const writable = await fileHandle.createWritable();
   await writable.write(content);
   await writable.close();
+}
+
+async function writeBinaryFile(rootHandle, pathSegment, filename, blob) {
+  const dir = await getSubdir(rootHandle, pathSegment);
+  const fileHandle = await dir.getFileHandle(filename, { create: true });
+  const writable = await fileHandle.createWritable();
+  await writable.write(blob);
+  await writable.close();
+}
+
+function extFromUrlOrType(url, contentType) {
+  const type = (contentType || '').toLowerCase();
+  if (type.includes('png')) return 'png';
+  if (type.includes('jpeg') || type.includes('jpg')) return 'jpg';
+  if (type.includes('webp')) return 'webp';
+  if (type.includes('gif')) return 'gif';
+  try {
+    const pathname = new URL(url).pathname;
+    const match = pathname.match(/\.(png|jpe?g|webp|gif)(\?|$)/i);
+    if (match) return match[1].toLowerCase().replace('jpeg', 'jpg');
+  } catch {
+    /* invalid URL or pathname */
+  }
+  return 'png';
 }
 
 async function ensureUniqueFilename(rootHandle, pathSegment, baseFilename) {
@@ -134,10 +158,46 @@ saveBtn.addEventListener('click', async () => {
   msgEl.textContent = '';
 
   try {
-    const { content, knowledgePath, filename } = pendingData;
+    const { content, knowledgePath, filename, images: rawImages } = pendingData;
+    const images = Array.isArray(rawImages) ? rawImages : [];
     const handle = await obtainWritableHandle();
     const finalFilename = await ensureUniqueFilename(handle, knowledgePath, filename);
-    await writeFile(handle, knowledgePath, finalFilename, content);
+    const stem = finalFilename.replace(/\.md$/i, '');
+    const assetsDirName = stem + '-assets';
+    const assetsPathSegment = knowledgePath + '/' + assetsDirName;
+
+    let finalContent = content;
+    if (images.length > 0) {
+      const localPaths = [];
+      const alts = [];
+      for (let i = 0; i < images.length; i++) {
+        const img = images[i];
+        const src = img && img.src ? String(img.src) : '';
+        const alt = (img && img.alt ? String(img.alt) : '').replace(/\]/g, '\\]');
+        if (!src) continue;
+        try {
+          const res = await fetch(src, { mode: 'cors', credentials: 'omit' });
+          if (!res.ok) continue;
+          const blob = await res.blob();
+          const contentType = res.headers.get('content-type') || '';
+          const ext = extFromUrlOrType(src, contentType);
+          const imgFilename = 'img-' + i + '.' + ext;
+          await writeBinaryFile(handle, assetsPathSegment, imgFilename, blob);
+          localPaths.push('./' + assetsDirName + '/' + imgFilename);
+          alts.push(alt);
+        } catch {
+          /* skip failed image */
+        }
+      }
+      if (localPaths.length > 0) {
+        const imageLines = localPaths.map(function (path, idx) {
+          return '![' + alts[idx] + '](' + path + ')';
+        });
+        finalContent = content + '\n\n## 图片\n\n' + imageLines.join('\n\n');
+      }
+    }
+
+    await writeFile(handle, knowledgePath, finalFilename, finalContent);
 
     await chrome.storage.session.remove('pendingSave');
     await chrome.storage.session.set({ saveResult: { ok: true, filename: finalFilename, path: knowledgePath } });

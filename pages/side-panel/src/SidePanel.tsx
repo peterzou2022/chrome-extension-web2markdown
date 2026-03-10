@@ -205,7 +205,12 @@ const SidePanel = () => {
       const content = buildMarkdown(payload);
 
       await chrome.storage.session.set({
-        pendingSave: { content, knowledgePath, filename },
+        pendingSave: {
+          content,
+          knowledgePath,
+          filename,
+          images: pageInfo?.images ?? [],
+        },
         saveResult: null,
       });
 
@@ -247,7 +252,7 @@ const SidePanel = () => {
     } finally {
       setSaveLoading(false);
     }
-  }, [summary, pageInfo, knowledgePath, filename, sendMessage]);
+  }, [summary, pageInfo, knowledgePath, filename]);
 
   const updateSummary = useCallback((patch: Partial<AiSummaryOutput>) => {
     setSummary(prev => (prev ? { ...prev, ...patch } : null));

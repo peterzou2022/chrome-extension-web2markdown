@@ -49,3 +49,19 @@ export const writeFileToKnowledgeDir = async (
   await writable.write(content);
   await writable.close();
 };
+
+/**
+ * Write a binary file (e.g. image) into a subdirectory of the given directory handle.
+ */
+export const writeBinaryFileToKnowledgeDir = async (
+  rootHandle: FileSystemDirectoryHandle,
+  pathSegment: string,
+  filename: string,
+  blob: Blob,
+): Promise<void> => {
+  const dir = await getSubdir(rootHandle, pathSegment);
+  const fileHandle = await dir.getFileHandle(filename, { create: true });
+  const writable = await fileHandle.createWritable();
+  await writable.write(blob);
+  await writable.close();
+};

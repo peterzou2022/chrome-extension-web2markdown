@@ -1,4 +1,12 @@
 /**
+ * One image reference from the article body.
+ */
+export interface ExtractedImage {
+  src: string;
+  alt: string;
+}
+
+/**
  * Result of extracting article content from the current page.
  */
 export interface ExtractedPageInfo {
@@ -9,6 +17,7 @@ export interface ExtractedPageInfo {
   publishedAt: string;
   bodyText: string;
   selectedText: string | null;
+  images: ExtractedImage[];
 }
 
 /**

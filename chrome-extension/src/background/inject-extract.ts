@@ -10,6 +10,7 @@ export const getExtractFunction = (): (() => {
   publishedAt: string;
   bodyText: string;
   selectedText: string | null;
+  images: { src: string; alt: string }[];
 }) =>
   function extract() {
     const doc = document;
@@ -46,6 +47,7 @@ export const getExtractFunction = (): (() => {
       '.comments',
       '#comments',
       '.comment-list',
+      '.divide-y.divide-gray-200',
       '.related-posts',
       '.related-articles',
       '.share',
@@ -53,13 +55,63 @@ export const getExtractFunction = (): (() => {
       '.ad',
       '.ads',
       '.advertisement',
+      '.post-meta',
+      '.entry-meta',
+      '.article-meta',
+      '.byline',
+      '[class*="post-meta"]',
+      '[class*="entry-meta"]',
+      '[class*="article-meta"]',
     ];
+
+    const removeCommentSections = (root: HTMLElement): void => {
+      const commentMarkers = Array.from(
+        root.querySelectorAll<HTMLElement>('h1, h2, h3, h4, h5, h6, div, span, p'),
+      ).filter(el => {
+        const text = el.innerText?.trim();
+        return text === '评论区' || text === '评论';
+      });
+
+      for (const marker of commentMarkers) {
+        const removableParent = marker.closest('.divide-y.divide-gray-200') ?? marker.parentElement;
+
+        if (removableParent?.parentElement) {
+          let next = removableParent.nextElementSibling;
+          while (next) {
+            const current = next;
+            next = next.nextElementSibling;
+            current.remove();
+          }
+          removableParent.remove();
+        } else {
+          marker.remove();
+        }
+      }
+    };
+
+    const removeContentBeforeTitle = (root: HTMLElement): void => {
+      const titleEl = root.querySelector(
+        'h1, h2, [role="heading"], .post-title, .article-title, [class*="post-title"], [class*="article-title"]',
+      );
+      if (!titleEl) return;
+      const toRemove: Node[] = [];
+      const walk = (node: Node): void => {
+        if (node !== titleEl && node.compareDocumentPosition(titleEl) === Node.DOCUMENT_POSITION_FOLLOWING)
+          toRemove.push(node);
+        node.childNodes.forEach(walk);
+      };
+      walk(root);
+      toRemove.sort((a, b) => (a.compareDocumentPosition(b) === Node.DOCUMENT_POSITION_FOLLOWING ? 1 : -1));
+      toRemove.forEach(n => n.parentNode?.removeChild(n));
+    };
 
     const cleanText = (el: HTMLElement): string => {
       const clone = el.cloneNode(true) as HTMLElement;
       for (const s of NOISE_SELS) {
         clone.querySelectorAll(s).forEach(n => n.remove());
       }
+      removeCommentSections(clone);
+      removeContentBeforeTitle(clone);
       return clone.innerText?.trim() ?? '';
     };
 
@@ -87,9 +139,12 @@ export const getExtractFunction = (): (() => {
     ];
     let bodyText = getText(candidates);
     if (!bodyText && doc.body) {
-      const main = (doc.body.querySelector('main') ?? doc.body.querySelector('article') ?? doc.body) as HTMLElement;
-      bodyText = cleanText(main) || doc.body.innerText?.trim() || '';
+      const mainContainer = (doc.body.querySelector('main') ??
+        doc.body.querySelector('article') ??
+        doc.body) as HTMLElement;
+      bodyText = cleanText(mainContainer) || doc.body.innerText?.trim() || '';
     }
+    if (!bodyText && doc.body) bodyText = doc.body.innerText?.trim() || '';
     bodyText = (bodyText || '').slice(0, 200000);
 
     const selectedText =
@@ -110,6 +165,49 @@ export const getExtractFunction = (): (() => {
       doc.querySelector('time[datetime]')?.getAttribute('datetime') ||
       '';
 
+    const IMAGE_NOISE_SELS = [...NOISE_SELS, '.avatar', '.user-avatar', '.comment-avatar', '[class*="avatar"]'];
+    const isInsideNoiseContainer = (el: Element) => IMAGE_NOISE_SELS.some(s => Boolean(el.closest(s)));
+    const isAfterNode = (reference: Node, target: Node) =>
+      Boolean(reference.compareDocumentPosition(target) & Node.DOCUMENT_POSITION_FOLLOWING);
+    const getCommentBoundary = (container: HTMLElement): HTMLElement | null => {
+      const candidates = Array.from(container.querySelectorAll<HTMLElement>('h1, h2, h3, h4, h5, h6, div, span, p'));
+      return (
+        candidates.find(el => {
+          const text = el.innerText?.trim();
+          return text === '评论区' || text === '评论';
+        }) ?? null
+      );
+    };
+
+    const MIN_DIM = 80;
+    const images: { src: string; alt: string }[] = [];
+    if (mainContainer) {
+      const titleElement = doc.querySelector('h1') as HTMLElement | null;
+      const commentBoundary = getCommentBoundary(mainContainer);
+      const seen = new Set<string>();
+      const imgs = Array.from(mainContainer.querySelectorAll<HTMLImageElement>('img'));
+      for (const img of imgs) {
+        if (isInsideNoiseContainer(img)) continue;
+        if (titleElement && !isAfterNode(titleElement, img)) continue;
+        if (commentBoundary && isAfterNode(commentBoundary, img)) continue;
+        const rawSrc = img.currentSrc || img.getAttribute('src') || img.getAttribute('data-src') || '';
+        if (!rawSrc || rawSrc.startsWith('data:')) continue;
+        let absUrl: string;
+        try {
+          absUrl = new URL(rawSrc, url).href;
+        } catch {
+          continue;
+        }
+        if (seen.has(absUrl)) continue;
+        seen.add(absUrl);
+        const w = img.naturalWidth || img.width || parseInt(img.getAttribute('width') || '0', 10);
+        const h = img.naturalHeight || img.height || parseInt(img.getAttribute('height') || '0', 10);
+        if (w > 0 && h > 0 && (w < MIN_DIM || h < MIN_DIM)) continue;
+        images.push({ src: absUrl, alt: (img.getAttribute('alt') || '').trim().slice(0, 200) });
+      }
+    }
+    const imagesSlice = images.slice(0, 50);
+
     return {
       title,
       url,
@@ -118,5 +216,6 @@ export const getExtractFunction = (): (() => {
       publishedAt,
       bodyText,
       selectedText,
+      images: imagesSlice,
     };
   };
