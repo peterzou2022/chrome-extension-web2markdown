@@ -6,8 +6,9 @@ describe('sanitizeFilename', () => {
     expect(sanitizeFilename('a/b\\c:d')).toBe('a-b-c-d');
   });
 
-  it('collapses spaces', () => {
-    expect(sanitizeFilename('a   b')).toBe('a b');
+  it('replaces spaces with hyphen for path-safe filenames (Obsidian etc.)', () => {
+    expect(sanitizeFilename('a   b')).toBe('a-b');
+    expect(sanitizeFilename('通过查看 vercel.app 的子域名')).toBe('通过查看-vercel.app-的子域名');
   });
 
   it('returns untitled for empty or whitespace-only input', () => {

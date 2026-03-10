@@ -150,15 +150,15 @@ export const getExtractFunction = (): (() => {
       return clone.innerText?.trim() ?? '';
     };
 
-    const getText = (selectors: string[]): string => {
-      for (const sel of selectors) {
-        const el = doc.querySelector(sel) as HTMLElement | null;
-        if (el) {
-          const t = cleanText(el);
-          if (t.length > 100) return t;
-        }
-      }
-      return '';
+    const IMAGE_PLACEHOLDER_PREFIX = 'IMAGE_PLACEHOLDER_';
+    const MIN_DIM = 80;
+    const IMAGE_NOISE_SELS = [...NOISE_SELS, '.avatar', '.user-avatar', '.comment-avatar', '[class*="avatar"]'];
+    const isInsideNoiseContainer = (el: Element) => IMAGE_NOISE_SELS.some(s => Boolean(el.closest(s)));
+    const isAfterNode = (reference: Node, target: Node) =>
+      Boolean(reference.compareDocumentPosition(target) & Node.DOCUMENT_POSITION_FOLLOWING);
+    const getCommentBoundary = (container: HTMLElement): HTMLElement | null => {
+      const list = Array.from(container.querySelectorAll<HTMLElement>('h1, h2, h3, h4, h5, h6, div, span, p'));
+      return list.find(el => el.innerText?.trim() === '评论区' || el.innerText?.trim() === '评论') ?? null;
     };
 
     const candidates = [
@@ -187,22 +187,143 @@ export const getExtractFunction = (): (() => {
     if (!mainContainer && doc.body) {
       mainContainer = (doc.body.querySelector('main') ?? doc.body.querySelector('article') ?? doc.body) as HTMLElement;
     }
-    let bodyText = getText(candidates);
-    if (!bodyText && doc.body) {
-      bodyText = mainContainer
-        ? cleanText(mainContainer) || doc.body.innerText?.trim() || ''
-        : doc.body.innerText?.trim() || '';
-    }
-    if (!bodyText && doc.body) bodyText = doc.body.innerText?.trim() || '';
-    bodyText = (bodyText || '').slice(0, 200000);
+    const url = loc?.href ?? '';
+
+    const cloneAndCleanForWalk = (el: HTMLElement): HTMLElement => {
+      const clone = el.cloneNode(true) as HTMLElement;
+      for (const s of NOISE_SELS) clone.querySelectorAll(s).forEach(n => n.remove());
+      removeCommentSections(clone);
+      removeContentBeforeTitle(clone);
+      removeShortSidebarAfterTitle(clone);
+      return clone;
+    };
+    const walkCollectTextAndImages = (
+      node: Node,
+      segments: (string | { type: 'img'; src: string; alt: string })[],
+      ctx: {
+        baseHref: string;
+        titleEl: HTMLElement | null;
+        commentBoundary: HTMLElement | null;
+        seen: Set<string>;
+      },
+    ): void => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        const t = node.textContent ?? '';
+        if (t.length > 0) segments.push(t);
+        return;
+      }
+      if (node.nodeType !== Node.ELEMENT_NODE) return;
+      const el = node as HTMLElement;
+      if (el.tagName === 'IMG') {
+        const img = el as HTMLImageElement;
+        if (isInsideNoiseContainer(img)) return;
+        if (ctx.titleEl && !isAfterNode(ctx.titleEl, img)) return;
+        if (ctx.commentBoundary && isAfterNode(ctx.commentBoundary, img)) return;
+        const rawSrc = img.currentSrc || img.getAttribute('src') || img.getAttribute('data-src') || '';
+        if (!rawSrc || rawSrc.startsWith('data:')) return;
+        let absUrl: string;
+        try {
+          absUrl = new URL(rawSrc, ctx.baseHref).href;
+        } catch {
+          return;
+        }
+        if (ctx.seen.has(absUrl)) return;
+        ctx.seen.add(absUrl);
+        const w = img.naturalWidth || img.width || parseInt(img.getAttribute('width') || '0', 10);
+        const h = img.naturalHeight || img.height || parseInt(img.getAttribute('height') || '0', 10);
+        if (w > 0 && h > 0 && (w < MIN_DIM || h < MIN_DIM)) return;
+        segments.push({
+          type: 'img',
+          src: absUrl,
+          alt: (img.getAttribute('alt') || '').trim().slice(0, 200),
+        });
+        return;
+      }
+      for (const child of Array.from(el.childNodes)) walkCollectTextAndImages(child, segments, ctx);
+    };
+    const getMainTextWithImagePlaceholders = (
+      baseHref: string,
+      container: HTMLElement,
+    ): { bodyText: string; images: { src: string; alt: string }[] } => {
+      const clone = cloneAndCleanForWalk(container);
+      const titleEl = clone.querySelector('h1') as HTMLElement | null;
+      const commentBoundary = getCommentBoundary(clone);
+      const segments: (string | { type: 'img'; src: string; alt: string })[] = [];
+      walkCollectTextAndImages(clone, segments, {
+        baseHref,
+        titleEl,
+        commentBoundary,
+        seen: new Set<string>(),
+      });
+      const images: { src: string; alt: string }[] = [];
+      let bodyText = '';
+      let index = 0;
+      for (const seg of segments) {
+        if (typeof seg === 'string') {
+          bodyText += seg;
+        } else {
+          const altEscaped = seg.alt.replace(/\\/g, '\\\\').replace(/\]/g, '\\]');
+          bodyText += '\n\n![' + altEscaped + '](' + IMAGE_PLACEHOLDER_PREFIX + index + ')\n\n';
+          images.push({ src: seg.src, alt: seg.alt });
+          index += 1;
+        }
+      }
+      return {
+        bodyText: bodyText
+          .trim()
+          .replace(/\n{3,}/g, '\n\n')
+          .slice(0, 200000),
+        images: images.slice(0, 50),
+      };
+    };
 
     const selectedText =
       typeof doc.getSelection?.()?.toString === 'function' ? doc.getSelection()!.toString().trim() || null : null;
-    if (selectedText && selectedText.length > 50) bodyText = selectedText;
+
+    let bodyText: string;
+    let imagesSlice: { src: string; alt: string }[];
+    if (selectedText && selectedText.length > 50) {
+      bodyText = selectedText;
+      imagesSlice = [];
+      if (mainContainer) {
+        const titleElement = doc.querySelector('h1') as HTMLElement | null;
+        const commentBoundary = getCommentBoundary(mainContainer);
+        const seen = new Set<string>();
+        const imgs = Array.from(mainContainer.querySelectorAll<HTMLImageElement>('img'));
+        for (const img of imgs) {
+          if (isInsideNoiseContainer(img)) continue;
+          if (titleElement && !isAfterNode(titleElement, img)) continue;
+          if (commentBoundary && isAfterNode(commentBoundary, img)) continue;
+          const rawSrc = img.currentSrc || img.getAttribute('src') || img.getAttribute('data-src') || '';
+          if (!rawSrc || rawSrc.startsWith('data:')) continue;
+          let absUrl: string;
+          try {
+            absUrl = new URL(rawSrc, url).href;
+          } catch {
+            continue;
+          }
+          if (seen.has(absUrl)) continue;
+          seen.add(absUrl);
+          const w = img.naturalWidth || img.width || parseInt(img.getAttribute('width') || '0', 10);
+          const h = img.naturalHeight || img.height || parseInt(img.getAttribute('height') || '0', 10);
+          if (w > 0 && h > 0 && (w < MIN_DIM || h < MIN_DIM)) continue;
+          imagesSlice.push({ src: absUrl, alt: (img.getAttribute('alt') || '').trim().slice(0, 200) });
+        }
+        imagesSlice = imagesSlice.slice(0, 50);
+      }
+    } else {
+      if (!mainContainer) {
+        bodyText = (doc.body?.innerText?.trim() ?? '').slice(0, 200000);
+        imagesSlice = [];
+      } else {
+        const withPh = getMainTextWithImagePlaceholders(url, mainContainer);
+        bodyText = withPh.bodyText || cleanText(mainContainer).slice(0, 200000) || doc.body?.innerText?.trim() || '';
+        imagesSlice = withPh.images;
+      }
+    }
 
     const title =
       getMeta(['og:title', 'twitter:title']) || doc.querySelector('h1')?.textContent?.trim() || doc.title || '';
-    const url = loc?.href ?? '';
     const hostname = loc?.hostname ?? '';
     const siteName = getMeta(['og:site_name']) || hostname || '';
 
@@ -277,49 +398,6 @@ export const getExtractFunction = (): (() => {
       if (!author) author = fromBlock.author;
       if (!publishedAt) publishedAt = fromBlock.publishedAt;
     }
-
-    const IMAGE_NOISE_SELS = [...NOISE_SELS, '.avatar', '.user-avatar', '.comment-avatar', '[class*="avatar"]'];
-    const isInsideNoiseContainer = (el: Element) => IMAGE_NOISE_SELS.some(s => Boolean(el.closest(s)));
-    const isAfterNode = (reference: Node, target: Node) =>
-      Boolean(reference.compareDocumentPosition(target) & Node.DOCUMENT_POSITION_FOLLOWING);
-    const getCommentBoundary = (container: HTMLElement): HTMLElement | null => {
-      const candidates = Array.from(container.querySelectorAll<HTMLElement>('h1, h2, h3, h4, h5, h6, div, span, p'));
-      return (
-        candidates.find(el => {
-          const text = el.innerText?.trim();
-          return text === '评论区' || text === '评论';
-        }) ?? null
-      );
-    };
-
-    const MIN_DIM = 80;
-    const images: { src: string; alt: string }[] = [];
-    if (mainContainer) {
-      const titleElement = doc.querySelector('h1') as HTMLElement | null;
-      const commentBoundary = getCommentBoundary(mainContainer);
-      const seen = new Set<string>();
-      const imgs = Array.from(mainContainer.querySelectorAll<HTMLImageElement>('img'));
-      for (const img of imgs) {
-        if (isInsideNoiseContainer(img)) continue;
-        if (titleElement && !isAfterNode(titleElement, img)) continue;
-        if (commentBoundary && isAfterNode(commentBoundary, img)) continue;
-        const rawSrc = img.currentSrc || img.getAttribute('src') || img.getAttribute('data-src') || '';
-        if (!rawSrc || rawSrc.startsWith('data:')) continue;
-        let absUrl: string;
-        try {
-          absUrl = new URL(rawSrc, url).href;
-        } catch {
-          continue;
-        }
-        if (seen.has(absUrl)) continue;
-        seen.add(absUrl);
-        const w = img.naturalWidth || img.width || parseInt(img.getAttribute('width') || '0', 10);
-        const h = img.naturalHeight || img.height || parseInt(img.getAttribute('height') || '0', 10);
-        if (w > 0 && h > 0 && (w < MIN_DIM || h < MIN_DIM)) continue;
-        images.push({ src: absUrl, alt: (img.getAttribute('alt') || '').trim().slice(0, 200) });
-      }
-    }
-    const imagesSlice = images.slice(0, 50);
 
     return {
       title,

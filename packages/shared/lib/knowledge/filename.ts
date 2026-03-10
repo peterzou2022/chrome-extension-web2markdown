@@ -1,10 +1,17 @@
 /**
- * Sanitize a string for use as a filename (no path separators or reserved chars).
+ * Sanitize a string for use as a filename (no path separators, reserved chars, or spaces).
+ * Spaces are replaced with hyphens so Obsidian and other tools can resolve image paths.
  */
 const INVALID_CHARS = /[/\\:*?"<>|]/g;
 
 export const sanitizeFilename = (title: string): string =>
-  title.replace(INVALID_CHARS, '-').replace(/\s+/g, ' ').trim().slice(0, 200) || 'untitled';
+  title
+    .replace(INVALID_CHARS, '-')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .trim()
+    .slice(0, 200) || 'untitled';
 
 /**
  * Format final filename: YYYY-MM-DD-sanitized-title.md, optional suffix for conflict.

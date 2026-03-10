@@ -256,6 +256,9 @@ const getMainText = (doc: Document): string => {
 
 const MIN_IMAGE_DIMENSION = 80;
 
+/** 正文中图片占位符，保存时由 save-helper 替换为本地路径。格式为 IMAGE_PLACEHOLDER_0, IMAGE_PLACEHOLDER_1 ... */
+const IMAGE_PLACEHOLDER_PREFIX = 'IMAGE_PLACEHOLDER_';
+
 const IMAGE_NOISE_SELECTORS = [...NOISE_SELECTORS, '.avatar', '.user-avatar', '.comment-avatar', '[class*="avatar"]'];
 
 const isInsideNoiseContainer = (el: Element): boolean => IMAGE_NOISE_SELECTORS.some(sel => Boolean(el.closest(sel)));
@@ -305,6 +308,105 @@ const getImagesFromContainer = (
   return out.slice(0, 50);
 };
 
+type TextOrImageSegment = string | { type: 'img'; src: string; alt: string };
+
+const cloneAndCleanForWalk = (el: HTMLElement): HTMLElement => {
+  const clone = el.cloneNode(true) as HTMLElement;
+  for (const sel of NOISE_SELECTORS) {
+    clone.querySelectorAll(sel).forEach(n => n.remove());
+  }
+  removeCommentSections(clone);
+  removeContentBeforeTitle(clone);
+  removeShortSidebarAfterTitle(clone);
+  return clone;
+};
+
+const walkCollectTextAndImages = (
+  node: Node,
+  segments: TextOrImageSegment[],
+  ctx: {
+    baseHref: string;
+    titleEl: HTMLElement | null;
+    commentBoundary: HTMLElement | null;
+    seen: Set<string>;
+  },
+): void => {
+  if (node.nodeType === Node.TEXT_NODE) {
+    const text = node.textContent ?? '';
+    if (text.length > 0) segments.push(text);
+    return;
+  }
+  if (node.nodeType !== Node.ELEMENT_NODE) return;
+  const el = node as HTMLElement;
+  if (el.tagName === 'IMG') {
+    const img = el as HTMLImageElement;
+    if (isInsideNoiseContainer(img)) return;
+    if (ctx.titleEl && !isAfterNode(ctx.titleEl, img)) return;
+    if (ctx.commentBoundary && isAfterNode(ctx.commentBoundary, img)) return;
+    const rawSrc = img.currentSrc || img.getAttribute('src') || img.getAttribute('data-src') || '';
+    if (!rawSrc || rawSrc.startsWith('data:')) return;
+    let absUrl: string;
+    try {
+      absUrl = new URL(rawSrc, ctx.baseHref).href;
+    } catch {
+      return;
+    }
+    if (ctx.seen.has(absUrl)) return;
+    ctx.seen.add(absUrl);
+    const w = img.naturalWidth || img.width || parseInt(img.getAttribute('width') || '0', 10);
+    const h = img.naturalHeight || img.height || parseInt(img.getAttribute('height') || '0', 10);
+    if (w > 0 && h > 0 && (w < MIN_IMAGE_DIMENSION || h < MIN_IMAGE_DIMENSION)) return;
+    segments.push({
+      type: 'img',
+      src: absUrl,
+      alt: (img.getAttribute('alt') || '').trim().slice(0, 200),
+    });
+    return;
+  }
+  for (const child of Array.from(el.childNodes)) {
+    walkCollectTextAndImages(child, segments, ctx);
+  }
+};
+
+/** 按 DOM 顺序生成带图片占位符的正文及图片列表，供保存时替换为本地路径 */
+const getMainTextWithImagePlaceholders = (
+  doc: Document,
+  baseHref: string,
+): { bodyText: string; images: ExtractedImage[] } => {
+  const container = getMainContainer(doc);
+  if (!container) return { bodyText: getMainText(doc).slice(0, 200000), images: [] };
+  const clone = cloneAndCleanForWalk(container);
+  const titleEl = clone.querySelector('h1') as HTMLElement | null;
+  const commentBoundary = getCommentBoundary(clone);
+  const segments: TextOrImageSegment[] = [];
+  walkCollectTextAndImages(clone, segments, {
+    baseHref,
+    titleEl,
+    commentBoundary,
+    seen: new Set<string>(),
+  });
+  const images: ExtractedImage[] = [];
+  let bodyText = '';
+  let index = 0;
+  for (const seg of segments) {
+    if (typeof seg === 'string') {
+      bodyText += seg;
+    } else {
+      const altEscaped = seg.alt.replace(/\\/g, '\\\\').replace(/\]/g, '\\]');
+      bodyText += `\n\n![${altEscaped}](${IMAGE_PLACEHOLDER_PREFIX}${index})\n\n`;
+      images.push({ src: seg.src, alt: seg.alt });
+      index += 1;
+    }
+  }
+  return {
+    bodyText: bodyText
+      .trim()
+      .replace(/\n{3,}/g, '\n\n')
+      .slice(0, 200000),
+    images: images.slice(0, 50),
+  };
+};
+
 export const extractFromDocument = (doc: Document, selectedText: string | null): ExtractedPageInfo => {
   const url = doc.defaultView?.location?.href ?? '';
   const hostname = doc.defaultView?.location?.hostname ?? '';
@@ -333,10 +435,18 @@ export const extractFromDocument = (doc: Document, selectedText: string | null):
     if (!publishedAt) publishedAt = fromBlock.publishedAt;
   }
 
-  const bodyText = selectedText && selectedText.length > 50 ? selectedText : getMainText(doc);
-  const mainContainer = getMainContainer(doc);
-  const titleElement = doc.querySelector('h1') as HTMLElement | null;
-  const images = getImagesFromContainer(mainContainer, url, titleElement);
+  let bodyText: string;
+  let images: ExtractedImage[];
+  if (selectedText && selectedText.length > 50) {
+    bodyText = selectedText;
+    const mainContainer = getMainContainer(doc);
+    const titleElement = doc.querySelector('h1') as HTMLElement | null;
+    images = getImagesFromContainer(mainContainer, url, titleElement);
+  } else {
+    const withPlaceholders = getMainTextWithImagePlaceholders(doc, url);
+    bodyText = withPlaceholders.bodyText;
+    images = withPlaceholders.images;
+  }
 
   return {
     title,
@@ -349,3 +459,5 @@ export const extractFromDocument = (doc: Document, selectedText: string | null):
     images,
   };
 };
+
+export { IMAGE_PLACEHOLDER_PREFIX };

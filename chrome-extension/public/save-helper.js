@@ -1,4 +1,4 @@
-/* global indexedDB, window, document, chrome, setTimeout, location, URL, fetch */
+/* global indexedDB, window, document, chrome, setTimeout, location, URL, fetch, Blob, console */
 
 const DB_NAME = 'knowledge-extension-db';
 const STORE_NAME = 'knowledge-dir';
@@ -59,17 +59,18 @@ async function getSubdir(rootHandle, pathSegment) {
   return current;
 }
 
-async function writeFile(rootHandle, pathSegment, filename, content) {
-  const dir = await getSubdir(rootHandle, pathSegment);
-  const fileHandle = await dir.getFileHandle(filename, { create: true });
+/** 向已获取的目录句柄写入文本文件，避免多次 getSubdir；用 Blob 写入以减少 state 错误 */
+async function writeTextToDir(dirHandle, filename, content) {
+  const fileHandle = await dirHandle.getFileHandle(filename, { create: true });
   const writable = await fileHandle.createWritable();
-  await writable.write(content);
+  const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
+  await writable.write(blob);
   await writable.close();
 }
 
-async function writeBinaryFile(rootHandle, pathSegment, filename, blob) {
-  const dir = await getSubdir(rootHandle, pathSegment);
-  const fileHandle = await dir.getFileHandle(filename, { create: true });
+/** 向已获取的目录句柄写入二进制文件，避免多次 getSubdir 触发 "state had changed" 错误 */
+async function writeBinaryToDir(dirHandle, filename, blob) {
+  const fileHandle = await dirHandle.getFileHandle(filename, { create: true });
   const writable = await fileHandle.createWritable();
   await writable.write(blob);
   await writable.close();
@@ -166,38 +167,66 @@ saveBtn.addEventListener('click', async () => {
     const assetsDirName = stem + '-assets';
     const assetsPathSegment = knowledgePath + '/' + assetsDirName;
 
+    const hasPlaceholders = /IMAGE_PLACEHOLDER_\d+/.test(content);
+    const localPaths = [];
+    const alts = [];
+    for (let i = 0; i < images.length; i++) {
+      const img = images[i];
+      const src = img && img.src ? String(img.src) : '';
+      const ext = extFromUrlOrType(src, '');
+      const imgFilename = 'img-' + i + '.' + ext;
+      localPaths.push('./' + assetsDirName + '/' + imgFilename);
+      alts.push((img && img.alt ? String(img.alt) : '').replace(/\]/g, '\\]'));
+    }
     let finalContent = content;
-    if (images.length > 0) {
-      const localPaths = [];
-      const alts = [];
-      for (let i = 0; i < images.length; i++) {
-        const img = images[i];
-        const src = img && img.src ? String(img.src) : '';
-        const alt = (img && img.alt ? String(img.alt) : '').replace(/\]/g, '\\]');
-        if (!src) continue;
-        try {
-          const res = await fetch(src, { mode: 'cors', credentials: 'omit' });
-          if (!res.ok) continue;
-          const blob = await res.blob();
-          const contentType = res.headers.get('content-type') || '';
-          const ext = extFromUrlOrType(src, contentType);
-          const imgFilename = 'img-' + i + '.' + ext;
-          await writeBinaryFile(handle, assetsPathSegment, imgFilename, blob);
-          localPaths.push('./' + assetsDirName + '/' + imgFilename);
-          alts.push(alt);
-        } catch {
-          /* skip failed image */
-        }
-      }
-      if (localPaths.length > 0) {
-        const imageLines = localPaths.map(function (path, idx) {
-          return '![' + alts[idx] + '](' + path + ')';
+    if (localPaths.length > 0) {
+      if (hasPlaceholders) {
+        finalContent = content.replace(/IMAGE_PLACEHOLDER_(\d+)/g, function (_, n) {
+          const idx = parseInt(n, 10);
+          return idx < localPaths.length ? localPaths[idx] : 'IMAGE_PLACEHOLDER_' + n;
         });
-        finalContent = content + '\n\n## 图片\n\n' + imageLines.join('\n\n');
+      } else {
+        finalContent =
+          content +
+          '\n\n## 图片\n\n' +
+          localPaths
+            .map(function (path, idx) {
+              return '![' + alts[idx] + '](' + path + ')';
+            })
+            .join('\n\n');
       }
     }
 
-    await writeFile(handle, knowledgePath, finalFilename, finalContent);
+    const mdDir = await getSubdir(handle, knowledgePath);
+    await writeTextToDir(mdDir, finalFilename, finalContent);
+
+    const blobsToWrite = [];
+    for (let i = 0; i < images.length; i++) {
+      const img = images[i];
+      const src = img && img.src ? String(img.src) : '';
+      if (!src) continue;
+      const ext = extFromUrlOrType(src, '');
+      const imgFilename = 'img-' + i + '.' + ext;
+      try {
+        const res = await fetch(src, { mode: 'cors', credentials: 'omit' });
+        if (!res.ok) continue;
+        const blob = await res.blob();
+        blobsToWrite.push({ filename: imgFilename, blob });
+      } catch {
+        /* skip failed image */
+      }
+    }
+    if (blobsToWrite.length > 0) {
+      const assetsDir = await getSubdir(handle, assetsPathSegment);
+      for (let i = 0; i < blobsToWrite.length; i++) {
+        const { filename, blob } = blobsToWrite[i];
+        try {
+          await writeBinaryToDir(assetsDir, filename, blob);
+        } catch (imgErr) {
+          console.warn('Image write failed:', filename, imgErr);
+        }
+      }
+    }
 
     await chrome.storage.session.remove('pendingSave');
     await chrome.storage.session.set({ saveResult: { ok: true, filename: finalFilename, path: knowledgePath } });
