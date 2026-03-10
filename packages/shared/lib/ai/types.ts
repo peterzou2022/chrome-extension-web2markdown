@@ -1,3 +1,5 @@
+import type { PrimaryCategory } from '../knowledge/categories.js';
+
 /**
  * V1: single provider; fixed as openai-compatible.
  */
@@ -44,10 +46,37 @@ export const MIN_TAGS = 1;
 /** How API key is persisted. */
 export type ApiKeyStorageStrategy = 'session' | 'local';
 
+/** One logical sub-category configuration. */
+export interface LogicalSubCategoryConfig {
+  /** Logical sub-category id, used in front matter and AI schema. */
+  id: string;
+  /** Display name shown in UI. */
+  label: string;
+  /** Physical directory name under the primary folder. */
+  dirName: string;
+}
+
+/** One logical primary category configuration. */
+export interface LogicalPrimaryCategoryConfig {
+  /** Logical primary id (e.g. SEO, OTHERS). */
+  id: PrimaryCategory | string;
+  /** Display name shown in UI. */
+  label: string;
+  /** Physical root directory name for this primary. */
+  dirName: string;
+  /** Sub-categories belonging to this primary. */
+  subCategories: LogicalSubCategoryConfig[];
+}
+
 /** Persisted options for the knowledge extension. */
 export interface KnowledgeOptionsState {
   models: ModelConfig[];
   defaultModelId: string;
   apiKeyStorageStrategy: ApiKeyStorageStrategy;
   saveFullText: boolean;
+  /**
+   * Optional full category configuration. When missing or empty, the extension
+   * falls back to the built-in PRIMARY_CATEGORIES + SUB_CATEGORIES defaults.
+   */
+  categoriesConfig?: LogicalPrimaryCategoryConfig[];
 }

@@ -3,16 +3,23 @@ import {
   useStorage,
   withErrorBoundary,
   withSuspense,
-  getKnowledgePath,
   formatKnowledgeFilename,
   buildMarkdown,
   PRIMARY_CATEGORIES,
   SUB_CATEGORIES,
+  DEFAULT_PRIMARY_TO_DIR,
 } from '@extension/shared';
 import { exampleThemeStorage, knowledgeOptionsStorage } from '@extension/storage';
 import { cn, ErrorDisplay, LoadingSpinner, ToggleButton } from '@extension/ui';
 import { useCallback, useEffect, useState } from 'react';
-import type { ExtractedPageInfo, AiSummaryOutput, MarkdownDocumentPayload, PrimaryCategory } from '@extension/shared';
+import type {
+  AiSummaryOutput,
+  ExtractedPageInfo,
+  LogicalPrimaryCategoryConfig,
+  LogicalSubCategoryConfig,
+  MarkdownDocumentPayload,
+  PrimaryCategory,
+} from '@extension/shared';
 
 const simpleHash = (s: string): string => {
   let h = 0;
@@ -22,6 +29,20 @@ const simpleHash = (s: string): string => {
   }
   return Math.abs(h).toString(36);
 };
+
+const buildDefaultCategoriesConfig = (): LogicalPrimaryCategoryConfig[] =>
+  PRIMARY_CATEGORIES.map(primary => ({
+    id: primary,
+    label: primary,
+    dirName: DEFAULT_PRIMARY_TO_DIR[primary],
+    subCategories: (SUB_CATEGORIES[primary] ?? []).map(
+      (sub): LogicalSubCategoryConfig => ({
+        id: sub,
+        label: sub,
+        dirName: sub,
+      }),
+    ),
+  }));
 
 const SidePanel = () => {
   const { isLight } = useStorage(exampleThemeStorage);
@@ -149,9 +170,22 @@ const SidePanel = () => {
     }
   }, [getActiveTabId, pageInfo, sendMessage]);
 
-  const knowledgePath = summary
-    ? getKnowledgePath(summary.primaryCategory as PrimaryCategory, summary.subCategory)
-    : 'Inbox';
+  const categories: LogicalPrimaryCategoryConfig[] =
+    options.categoriesConfig && options.categoriesConfig.length > 0
+      ? options.categoriesConfig
+      : buildDefaultCategoriesConfig();
+
+  const knowledgePath = (() => {
+    if (!summary) return 'Inbox';
+    const primaryCfg = categories.find(c => c.id === summary.primaryCategory);
+    if (!primaryCfg) return 'Inbox';
+    const subCfg = primaryCfg.subCategories.find(s => s.id === summary.subCategory);
+    if (!subCfg) return 'Inbox';
+    const fallbackRoot = DEFAULT_PRIMARY_TO_DIR[primaryCfg.id as PrimaryCategory] ?? String(primaryCfg.id);
+    const root = primaryCfg.dirName?.trim() || fallbackRoot;
+    const subDir = subCfg.dirName?.trim() || subCfg.id;
+    return `${root}/${subDir}`;
+  })();
   const filename = summary ? formatKnowledgeFilename(summary.titleZh || 'untitled') : '';
 
   const handleSave = useCallback(async () => {
@@ -168,6 +202,15 @@ const SidePanel = () => {
       const savedAt = new Date().toISOString();
       const contentHash = simpleHash(`${pageInfo.url}_${pageInfo.title}_${savedAt}`);
 
+      const categoriesAtSave =
+        opts.categoriesConfig && opts.categoriesConfig.length > 0
+          ? opts.categoriesConfig
+          : buildDefaultCategoriesConfig();
+      const primaryCfgAtSave = categoriesAtSave.find(c => c.id === summary.primaryCategory);
+      const subCfgAtSave = primaryCfgAtSave?.subCategories.find(s => s.id === summary.subCategory);
+      const primaryCategoryLabel = primaryCfgAtSave?.dirName?.trim() || summary.primaryCategory;
+      const subCategoryLabel = subCfgAtSave?.dirName?.trim() || summary.subCategory;
+
       const payload: MarkdownDocumentPayload = {
         frontMatter: {
           title: summary.titleZh,
@@ -177,8 +220,8 @@ const SidePanel = () => {
           author: pageInfo.author,
           published_at: pageInfo.publishedAt,
           saved_at: savedAt,
-          primary_category: summary.primaryCategory,
-          sub_category: summary.subCategory,
+          primary_category: primaryCategoryLabel,
+          sub_category: subCategoryLabel,
           knowledge_path: knowledgePath,
           tags: summary.tags,
           model: {
@@ -258,9 +301,11 @@ const SidePanel = () => {
     setSummary(prev => (prev ? { ...prev, ...patch } : null));
   }, []);
 
-  const subs = summary
-    ? ((SUB_CATEGORIES[summary.primaryCategory as PrimaryCategory] as readonly string[] | undefined) ?? [])
-    : [];
+  const subs: LogicalSubCategoryConfig[] = (() => {
+    if (!summary) return [];
+    const cfg = categories.find(c => c.id === summary.primaryCategory);
+    return cfg?.subCategories ?? [];
+  })();
 
   return (
     <div
@@ -388,20 +433,22 @@ const SidePanel = () => {
                   <select
                     id="summary-primary-category"
                     value={summary.primaryCategory}
-                    onChange={e =>
+                    onChange={e => {
+                      const nextId = e.target.value;
+                      const cfg = categories.find(c => c.id === nextId);
+                      const firstSub = cfg?.subCategories[0]?.id ?? '';
                       updateSummary({
-                        primaryCategory: e.target.value,
-                        subCategory:
-                          (SUB_CATEGORIES[e.target.value as PrimaryCategory] as readonly string[])?.[0] ?? '',
-                      })
-                    }
+                        primaryCategory: nextId,
+                        subCategory: firstSub,
+                      });
+                    }}
                     className={cn(
                       'w-full rounded border px-1 py-0.5 text-xs',
                       isLightTheme ? 'border-gray-300 bg-white' : 'border-gray-500 bg-gray-800',
                     )}>
-                    {PRIMARY_CATEGORIES.map(c => (
-                      <option key={c} value={c}>
-                        {c}
+                    {categories.map(c => (
+                      <option key={c.id} value={c.id}>
+                        {c.dirName || c.label || c.id}
                       </option>
                     ))}
                   </select>
@@ -419,8 +466,8 @@ const SidePanel = () => {
                       isLightTheme ? 'border-gray-300 bg-white' : 'border-gray-500 bg-gray-800',
                     )}>
                     {subs.map(s => (
-                      <option key={s} value={s}>
-                        {s}
+                      <option key={s.id} value={s.id}>
+                        {s.dirName || s.label || s.id}
                       </option>
                     ))}
                   </select>

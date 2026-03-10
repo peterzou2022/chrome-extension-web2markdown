@@ -6,6 +6,7 @@ const DEFAULT_STATE: KnowledgeOptionsState = {
   defaultModelId: '',
   apiKeyStorageStrategy: 'local',
   saveFullText: false,
+  categoriesConfig: [],
 };
 
 const STORAGE_KEY = 'knowledge-options';

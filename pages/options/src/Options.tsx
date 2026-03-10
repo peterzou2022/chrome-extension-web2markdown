@@ -7,6 +7,9 @@ import {
   getKnowledgeDirectoryHandle,
   removeKnowledgeDirectoryHandle,
   setKnowledgeDirectoryHandle,
+  PRIMARY_CATEGORIES,
+  SUB_CATEGORIES,
+  DEFAULT_PRIMARY_TO_DIR,
 } from '@extension/shared';
 import {
   exampleThemeStorage,
@@ -16,7 +19,67 @@ import {
 } from '@extension/storage';
 import { cn, ErrorDisplay, LoadingSpinner, ToggleButton } from '@extension/ui';
 import { useCallback, useEffect, useState } from 'react';
-import type { ApiKeyStorageStrategy, ModelConfig } from '@extension/shared';
+import type {
+  ApiKeyStorageStrategy,
+  LogicalPrimaryCategoryConfig,
+  LogicalSubCategoryConfig,
+  ModelConfig,
+} from '@extension/shared';
+
+const buildDefaultCategoriesConfig = (): LogicalPrimaryCategoryConfig[] =>
+  PRIMARY_CATEGORIES.map(primary => ({
+    id: primary,
+    label: primary,
+    dirName: DEFAULT_PRIMARY_TO_DIR[primary],
+    subCategories: (SUB_CATEGORIES[primary] ?? []).map(
+      (sub): LogicalSubCategoryConfig => ({
+        id: sub,
+        label: sub,
+        dirName: sub,
+      }),
+    ),
+  }));
+
+// SVG Icons components
+const TrashIcon = () => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    fill="none"
+    viewBox="0 0 24 24"
+    strokeWidth={1.5}
+    stroke="currentColor"
+    className="size-4">
+    <path
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"
+    />
+  </svg>
+);
+
+const PlusIcon = () => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    fill="none"
+    viewBox="0 0 24 24"
+    strokeWidth={1.5}
+    stroke="currentColor"
+    className="size-4">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+  </svg>
+);
+
+const XMarkIcon = () => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    fill="none"
+    viewBox="0 0 24 24"
+    strokeWidth={1.5}
+    stroke="currentColor"
+    className="size-4">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+  </svg>
+);
 
 const Options = () => {
   const { isLight } = useStorage(exampleThemeStorage);
@@ -293,6 +356,290 @@ const Options = () => {
               )}
             </div>
           )}
+        </section>
+
+        <section className="space-y-4">
+          <header>
+            <h2 className="text-lg font-semibold tracking-tight">分类目录结构</h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              配置保存到本地知识库时使用的一级目录名和二级目录名。
+            </p>
+          </header>
+
+          {(() => {
+            const categories: LogicalPrimaryCategoryConfig[] =
+              options.categoriesConfig && options.categoriesConfig.length > 0
+                ? options.categoriesConfig
+                : buildDefaultCategoriesConfig();
+            return (
+              <div className="space-y-6">
+                <div className="grid gap-6">
+                  {categories.map(primaryCfg => (
+                    <div
+                      key={primaryCfg.id}
+                      className={cn(
+                        'group overflow-hidden rounded-xl border shadow-sm transition-all hover:shadow-md',
+                        isLightTheme
+                          ? 'border-gray-200 bg-white shadow-gray-200/50'
+                          : 'border-gray-700 bg-gray-800 shadow-none',
+                      )}>
+                      {/* Primary Header */}
+                      <div
+                        className={cn(
+                          'flex items-center gap-4 border-b p-4',
+                          isLightTheme ? 'border-gray-100 bg-gray-50/50' : 'border-gray-700 bg-gray-800',
+                        )}>
+                        <div className="flex-1 space-y-1">
+                          <label
+                            htmlFor={`primary-dir-${primaryCfg.id}`}
+                            className="text-xs font-medium uppercase tracking-wider text-gray-500">
+                            一级目录名
+                          </label>
+                          <input
+                            id={`primary-dir-${primaryCfg.id}`}
+                            type="text"
+                            value={primaryCfg.dirName}
+                            onChange={e => {
+                              const value = e.target.value;
+                              knowledgeOptionsStorage.set(prev => {
+                                const prevCategories =
+                                  prev.categoriesConfig && prev.categoriesConfig.length > 0
+                                    ? prev.categoriesConfig
+                                    : buildDefaultCategoriesConfig();
+                                return {
+                                  ...prev,
+                                  categoriesConfig: prevCategories.map(c =>
+                                    c.id === primaryCfg.id ? { ...c, dirName: value } : c,
+                                  ),
+                                };
+                              });
+                            }}
+                            placeholder={
+                              DEFAULT_PRIMARY_TO_DIR[primaryCfg.id as keyof typeof DEFAULT_PRIMARY_TO_DIR] ??
+                              String(primaryCfg.id)
+                            }
+                            className={cn(
+                              'w-full rounded-md border px-3 py-2 text-sm transition-all focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20',
+                              isLightTheme
+                                ? 'border-gray-200 bg-white placeholder-gray-400'
+                                : 'border-gray-600 bg-gray-900 placeholder-gray-500',
+                            )}
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          className={cn(
+                            'flex h-10 w-10 items-center justify-center rounded-lg transition-colors',
+                            'text-gray-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20',
+                          )}
+                          title="删除一级目录"
+                          onClick={() =>
+                            knowledgeOptionsStorage.set(prev => {
+                              const prevCategories =
+                                prev.categoriesConfig && prev.categoriesConfig.length > 0
+                                  ? prev.categoriesConfig
+                                  : buildDefaultCategoriesConfig();
+                              return {
+                                ...prev,
+                                categoriesConfig: prevCategories.filter(c => c.id !== primaryCfg.id),
+                              };
+                            })
+                          }>
+                          <TrashIcon />
+                        </button>
+                      </div>
+
+                      {/* Subcategories Body */}
+                      <div className="space-y-3 p-4">
+                        <span className="text-xs font-medium uppercase tracking-wider text-gray-500">二级目录映射</span>
+                        {primaryCfg.subCategories.length > 0 ? (
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            {primaryCfg.subCategories.map(sub => (
+                              <div
+                                key={sub.id}
+                                className={cn(
+                                  'flex items-center gap-2 rounded-lg border p-2 pl-3',
+                                  isLightTheme ? 'border-gray-100 bg-gray-50' : 'border-gray-700 bg-gray-900',
+                                )}>
+                                <div className="min-w-0 flex-1">
+                                  <div className="mb-0.5 truncate text-[10px] font-medium uppercase tracking-wide text-gray-400">
+                                    {sub.id}
+                                  </div>
+                                  <input
+                                    type="text"
+                                    value={sub.dirName}
+                                    onChange={e => {
+                                      const value = e.target.value;
+                                      knowledgeOptionsStorage.set(prev => {
+                                        const prevCategories =
+                                          prev.categoriesConfig && prev.categoriesConfig.length > 0
+                                            ? prev.categoriesConfig
+                                            : buildDefaultCategoriesConfig();
+                                        return {
+                                          ...prev,
+                                          categoriesConfig: prevCategories.map(c =>
+                                            c.id === primaryCfg.id
+                                              ? {
+                                                  ...c,
+                                                  subCategories: c.subCategories.map(s =>
+                                                    s.id === sub.id ? { ...s, dirName: value } : s,
+                                                  ),
+                                                }
+                                              : c,
+                                          ),
+                                        };
+                                      });
+                                    }}
+                                    placeholder={sub.id}
+                                    className={cn(
+                                      'w-full border-0 bg-transparent p-0 text-sm placeholder-gray-400/50 focus:ring-0',
+                                      isLightTheme ? 'text-gray-900' : 'text-gray-100',
+                                    )}
+                                  />
+                                </div>
+                                <button
+                                  type="button"
+                                  className={cn(
+                                    'flex h-8 w-8 items-center justify-center rounded-md transition-colors',
+                                    'text-gray-400 hover:bg-white hover:text-red-600 dark:hover:bg-gray-800',
+                                  )}
+                                  onClick={() =>
+                                    knowledgeOptionsStorage.set(prev => {
+                                      const prevCategories =
+                                        prev.categoriesConfig && prev.categoriesConfig.length > 0
+                                          ? prev.categoriesConfig
+                                          : buildDefaultCategoriesConfig();
+                                      return {
+                                        ...prev,
+                                        categoriesConfig: prevCategories.map(c =>
+                                          c.id === primaryCfg.id
+                                            ? {
+                                                ...c,
+                                                subCategories: c.subCategories.filter(s => s.id !== sub.id),
+                                              }
+                                            : c,
+                                        ),
+                                      };
+                                    })
+                                  }>
+                                  <XMarkIcon />
+                                </button>
+                              </div>
+                            ))}
+                            {/* Add Sub Button */}
+                            <button
+                              type="button"
+                              className={cn(
+                                'flex h-[62px] w-full items-center justify-center gap-2 rounded-lg border border-dashed transition-all',
+                                'text-sm font-medium text-gray-500 hover:border-blue-400 hover:bg-blue-50/50 hover:text-blue-600',
+                                isLightTheme ? 'border-gray-200' : 'border-gray-700 hover:bg-blue-900/20',
+                              )}
+                              onClick={() =>
+                                knowledgeOptionsStorage.set(prev => {
+                                  const prevCategories =
+                                    prev.categoriesConfig && prev.categoriesConfig.length > 0
+                                      ? prev.categoriesConfig
+                                      : buildDefaultCategoriesConfig();
+                                  const nextCategories = prevCategories.map(c =>
+                                    c.id === primaryCfg.id
+                                      ? {
+                                          ...c,
+                                          subCategories: [
+                                            ...c.subCategories,
+                                            {
+                                              id: `Sub-${Date.now()}`,
+                                              label: `Sub-${Date.now()}`,
+                                              dirName: '',
+                                            },
+                                          ],
+                                        }
+                                      : c,
+                                  );
+                                  return {
+                                    ...prev,
+                                    categoriesConfig: nextCategories,
+                                  };
+                                })
+                              }>
+                              <PlusIcon />
+                              <span>添加二级</span>
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-gray-200 py-8 text-center dark:border-gray-700">
+                            <p className="mb-3 text-sm text-gray-500">暂无二级目录</p>
+                            <button
+                              type="button"
+                              className="flex items-center gap-2 rounded-md bg-blue-50 px-4 py-2 text-sm font-medium text-blue-600 transition-colors hover:bg-blue-100 dark:bg-blue-900/20 dark:text-blue-400 dark:hover:bg-blue-900/30"
+                              onClick={() =>
+                                knowledgeOptionsStorage.set(prev => {
+                                  const prevCategories =
+                                    prev.categoriesConfig && prev.categoriesConfig.length > 0
+                                      ? prev.categoriesConfig
+                                      : buildDefaultCategoriesConfig();
+                                  const nextCategories = prevCategories.map(c =>
+                                    c.id === primaryCfg.id
+                                      ? {
+                                          ...c,
+                                          subCategories: [
+                                            ...c.subCategories,
+                                            {
+                                              id: `Sub-${Date.now()}`,
+                                              label: `Sub-${Date.now()}`,
+                                              dirName: '',
+                                            },
+                                          ],
+                                        }
+                                      : c,
+                                  );
+                                  return {
+                                    ...prev,
+                                    categoriesConfig: nextCategories,
+                                  };
+                                })
+                              }>
+                              <PlusIcon />
+                              <span>添加第一个二级目录</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <button
+                  type="button"
+                  className={cn(
+                    'flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-dashed transition-all',
+                    'text-sm font-medium text-gray-500 hover:border-blue-400 hover:bg-blue-50/50 hover:text-blue-600',
+                    isLightTheme ? 'border-gray-300' : 'border-gray-600 hover:bg-blue-900/20',
+                  )}
+                  onClick={() =>
+                    knowledgeOptionsStorage.set(prev => {
+                      const prevCategories =
+                        prev.categoriesConfig && prev.categoriesConfig.length > 0
+                          ? prev.categoriesConfig
+                          : buildDefaultCategoriesConfig();
+                      const id = `Primary-${Date.now()}`;
+                      const next: LogicalPrimaryCategoryConfig = {
+                        id,
+                        label: id,
+                        dirName: '',
+                        subCategories: [],
+                      };
+                      return {
+                        ...prev,
+                        categoriesConfig: [...prevCategories, next],
+                      };
+                    })
+                  }>
+                  <PlusIcon />
+                  <span>添加一级分类目录</span>
+                </button>
+              </div>
+            );
+          })()}
         </section>
 
         <section className="space-y-3">
