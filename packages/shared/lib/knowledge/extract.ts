@@ -98,7 +98,6 @@ const NOISE_SELECTORS = [
   '.comments',
   '#comments',
   '.comment-list',
-  '.divide-y.divide-gray-200',
   '.related-posts',
   '.related-articles',
   '.share',
@@ -157,11 +156,13 @@ const removeCommentSections = (root: HTMLElement): void => {
   }
 };
 
-/** Remove all nodes that appear before the first title (h1 or h2) in document order. */
+/** Remove all nodes that appear before the first title in document order. Prefer h1 so mid-article h2 does not trim content. */
 const removeContentBeforeTitle = (root: HTMLElement): void => {
-  const titleEl = root.querySelector(
-    'h1, h2, [role="heading"], .post-title, .article-title, [class*="post-title"], [class*="article-title"]',
-  ) as HTMLElement | null;
+  const titleEl =
+    (root.querySelector('h1') as HTMLElement | null) ??
+    (root.querySelector(
+      'h2, [role="heading"], .post-title, .article-title, [class*="post-title"], [class*="article-title"]',
+    ) as HTMLElement | null);
   if (!titleEl) return;
   const toRemove: Node[] = [];
   const walk = (node: Node): void => {
@@ -175,19 +176,21 @@ const removeContentBeforeTitle = (root: HTMLElement): void => {
   toRemove.forEach(n => n.parentNode?.removeChild(n));
 };
 
-/** 移除标题所在容器的短文本兄弟节点（作者/时间栏常在标题前或后为独立块） */
+/** 仅移除标题容器「之前」的短文本兄弟节点（侧栏），保留标题后的正文段落。 */
 const MAX_SIDEBAR_TEXT_LENGTH = 400;
 const removeShortSidebarAfterTitle = (root: HTMLElement): void => {
-  const titleEl = root.querySelector(
-    'h1, h2, [role="heading"], .post-title, .article-title, [class*="post-title"], [class*="article-title"]',
-  ) as HTMLElement | null;
+  const titleEl =
+    (root.querySelector('h1') as HTMLElement | null) ??
+    (root.querySelector(
+      'h2, [role="heading"], .post-title, .article-title, [class*="post-title"], [class*="article-title"]',
+    ) as HTMLElement | null);
   if (!titleEl) return;
   const container = titleEl.parentElement;
   if (!container || container === root) return;
   const parent = container.parentElement;
   if (!parent) return;
   for (const child of Array.from(parent.children)) {
-    if (child === container) continue;
+    if (child === container) break;
     const el = child as HTMLElement;
     const text = el.innerText?.trim() ?? '';
     if (text.length > 0 && text.length <= MAX_SIDEBAR_TEXT_LENGTH) {
@@ -235,11 +238,27 @@ const CANDIDATE_SELECTORS = [
 ];
 
 const getMainContainer = (doc: Document): HTMLElement | null => {
+  const firstH1 = doc.querySelector('h1');
+  const body = doc.body;
+  let best: HTMLElement | null = null;
+  let bestLen = 0;
+  for (const sel of CANDIDATE_SELECTORS) {
+    const nodes = Array.from(doc.querySelectorAll<HTMLElement>(sel));
+    for (const el of nodes) {
+      const len = getCleanInnerText(el).length;
+      if (len <= 100) continue;
+      if (firstH1 && !el.contains(firstH1)) continue;
+      if (len > bestLen) {
+        bestLen = len;
+        best = el;
+      }
+    }
+  }
+  if (best) return best;
   for (const sel of CANDIDATE_SELECTORS) {
     const el = doc.querySelector(sel) as HTMLElement | null;
     if (el && getCleanInnerText(el).length > 100) return el;
   }
-  const body = doc.body;
   if (!body) return null;
   return (body.querySelector('main') ?? body.querySelector('article') ?? body) as HTMLElement;
 };

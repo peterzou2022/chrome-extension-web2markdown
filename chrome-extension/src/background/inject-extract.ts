@@ -47,7 +47,6 @@ export const getExtractFunction = (): (() => {
       '.comments',
       '#comments',
       '.comment-list',
-      '.divide-y.divide-gray-200',
       '.related-posts',
       '.related-articles',
       '.share',
@@ -106,9 +105,11 @@ export const getExtractFunction = (): (() => {
     };
 
     const removeContentBeforeTitle = (root: HTMLElement): void => {
-      const titleEl = root.querySelector(
-        'h1, h2, [role="heading"], .post-title, .article-title, [class*="post-title"], [class*="article-title"]',
-      );
+      const titleEl =
+        root.querySelector('h1') ??
+        root.querySelector(
+          'h2, [role="heading"], .post-title, .article-title, [class*="post-title"], [class*="article-title"]',
+        );
       if (!titleEl) return;
       const toRemove: Node[] = [];
       const walk = (node: Node): void => {
@@ -123,16 +124,18 @@ export const getExtractFunction = (): (() => {
 
     const MAX_SIDEBAR_LEN = 400;
     const removeShortSidebarAfterTitle = (root: HTMLElement): void => {
-      const titleEl = root.querySelector(
-        'h1, h2, [role="heading"], .post-title, .article-title, [class*="post-title"], [class*="article-title"]',
-      );
+      const titleEl =
+        root.querySelector('h1') ??
+        root.querySelector(
+          'h2, [role="heading"], .post-title, .article-title, [class*="post-title"], [class*="article-title"]',
+        );
       if (!titleEl) return;
       const container = titleEl.parentElement;
       if (!container || container === root) return;
       const parent = container.parentElement;
       if (!parent) return;
       for (const child of Array.from(parent.children)) {
-        if (child === container) continue;
+        if (child === container) break;
         const el = child as HTMLElement;
         const text = el.innerText?.trim() ?? '';
         if (text.length > 0 && text.length <= MAX_SIDEBAR_LEN) el.remove();
@@ -176,12 +179,28 @@ export const getExtractFunction = (): (() => {
       'main',
       '.content',
     ];
+    const firstH1 = doc.querySelector('h1');
     let mainContainer: HTMLElement | null = null;
+    let bestLen = 0;
     for (const sel of candidates) {
-      const el = doc.querySelector(sel) as HTMLElement | null;
-      if (el && cleanText(el).length > 100) {
-        mainContainer = el;
-        break;
+      const nodes = Array.from(doc.querySelectorAll<HTMLElement>(sel));
+      for (const el of nodes) {
+        const len = cleanText(el).length;
+        if (len <= 100) continue;
+        if (firstH1 && !el.contains(firstH1)) continue;
+        if (len > bestLen) {
+          bestLen = len;
+          mainContainer = el;
+        }
+      }
+    }
+    if (!mainContainer) {
+      for (const sel of candidates) {
+        const el = doc.querySelector(sel) as HTMLElement | null;
+        if (el && cleanText(el).length > 100) {
+          mainContainer = el;
+          break;
+        }
       }
     }
     if (!mainContainer && doc.body) {
