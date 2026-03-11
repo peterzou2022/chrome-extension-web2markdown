@@ -92,10 +92,10 @@ function extFromUrlOrType(url, contentType) {
   return 'png';
 }
 
-async function ensureUniqueFilename(rootHandle, pathSegment, baseFilename) {
-  const dir = await getSubdir(rootHandle, pathSegment);
+/** 在指定目录下解析出唯一文件名，避免与已有文件冲突 */
+async function ensureUniqueFilenameInDir(dirHandle, baseFilename) {
   try {
-    await dir.getFileHandle(baseFilename);
+    await dirHandle.getFileHandle(baseFilename);
   } catch {
     return baseFilename;
   }
@@ -162,10 +162,13 @@ saveBtn.addEventListener('click', async () => {
     const { content, knowledgePath, filename, images: rawImages } = pendingData;
     const images = Array.isArray(rawImages) ? rawImages : [];
     const handle = await obtainWritableHandle();
-    const finalFilename = await ensureUniqueFilename(handle, knowledgePath, filename);
+    const mdDir = await getSubdir(handle, knowledgePath);
+    const finalFilename = await ensureUniqueFilenameInDir(mdDir, filename);
     const stem = finalFilename.replace(/\.md$/i, '');
     const assetsDirName = stem + '-assets';
     const assetsPathSegment = knowledgePath + '/' + assetsDirName;
+    const needsAssets = images.length > 0;
+    const assetsDir = needsAssets ? await getSubdir(handle, assetsPathSegment) : null;
 
     const hasPlaceholders = /IMAGE_PLACEHOLDER_\d+/.test(content);
     const localPaths = [];
@@ -197,7 +200,6 @@ saveBtn.addEventListener('click', async () => {
       }
     }
 
-    const mdDir = await getSubdir(handle, knowledgePath);
     await writeTextToDir(mdDir, finalFilename, finalContent);
 
     const blobsToWrite = [];
@@ -216,14 +218,13 @@ saveBtn.addEventListener('click', async () => {
         /* skip failed image */
       }
     }
-    if (blobsToWrite.length > 0) {
-      const assetsDir = await getSubdir(handle, assetsPathSegment);
+    if (assetsDir && blobsToWrite.length > 0) {
       for (let i = 0; i < blobsToWrite.length; i++) {
-        const { filename, blob } = blobsToWrite[i];
+        const { filename: imgFilename, blob } = blobsToWrite[i];
         try {
-          await writeBinaryToDir(assetsDir, filename, blob);
+          await writeBinaryToDir(assetsDir, imgFilename, blob);
         } catch (imgErr) {
-          console.warn('Image write failed:', filename, imgErr);
+          console.warn('Image write failed:', imgFilename, imgErr);
         }
       }
     }
